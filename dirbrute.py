@@ -22,9 +22,11 @@ import argparse
 import concurrent.futures
 import os
 import random
+import re
 import string
 import sys
 import time
+from datetime import datetime
 
 import requests
 
@@ -37,6 +39,19 @@ DEFAULT_WORDLIST = [
     "swagger", "swagger-ui", "graphql", "rest", "encryptionkeys",
     "administration", "dashboard", ".htaccess", "wp-admin",
 ]
+
+
+def derive_output_filename(target: str) -> str:
+    """
+    Builds a filename like 'localhost_3000_20260721_143205.txt' from the
+    target and the current time. Colons (from ports) and slashes aren't
+    valid in Windows filenames, so anything outside a safe character set
+    gets replaced rather than letting the write fail partway through a run.
+    """
+    domain = re.sub(r"^https?://", "", target).rstrip("/")
+    safe_domain = re.sub(r"[^a-zA-Z0-9._-]", "_", domain)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{safe_domain}_{timestamp}.txt"
 
 
 def list_available_wordlists() -> list[str]:
@@ -112,6 +127,8 @@ def main():
     parser.add_argument("--delay", type=float, default=0.0, help="seconds to wait between requests, per thread")
     parser.add_argument("--timeout", type=int, default=8)
     parser.add_argument("--yes", action="store_true", help="skip the interactive confirmation prompt")
+    parser.add_argument("--output", help="output filename (default: <domain>_<timestamp>.txt, auto-generated)")
+    parser.add_argument("--no-output", action="store_true", help="skip writing a results file, print to console only")
     args = parser.parse_args()
 
     if args.list_wordlists:
@@ -159,6 +176,18 @@ def main():
                 print(f"  [{result['status']}] /{result['path']}  ({result['length']} bytes)")
 
     print(f"\n[*] Done. {len(findings)} finding(s) out of {len(wordlist)} paths tested.\n")
+
+    if not args.no_output:
+        output_path = args.output or derive_output_filename(target)
+        with open(output_path, "w") as f:
+            f.write(f"Target: {target}\n")
+            f.write(f"Scanned at: {datetime.now().isoformat()}\n")
+            f.write(f"Baseline: status={baseline[0]} length={baseline[1]}\n")
+            f.write(f"Wordlist: {len(wordlist)} entries\n\n")
+            for r in findings:
+                f.write(f"[{r['status']}] {r['url']}  ({r['length']} bytes)\n")
+            f.write(f"\nTotal findings: {len(findings)} / {len(wordlist)} tested\n")
+        print(f"[*] Results saved to {output_path}")
 
 
 if __name__ == "__main__":
